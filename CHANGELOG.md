@@ -35,9 +35,6 @@ Status: beta.
 - Docs: add GCP Compute Engine deployment guide. (#1848) Thanks @hougangdev.
 - Docs: add LINE channel guide. Thanks @thewilloftheshadow.
 - Docs: credit both contributors for Control UI refresh. (#1852) Thanks @EnzeD.
-- Memory: add optional QMD-backed memory backend with fallbacks to the existing Markdown index. Thanks @vgnsh.
-- Memory: surface QMD startup errors so we fall back to the legacy index when the CLI is missing, and allow extra QMD collections outside the workspace to return snippets via the `qmd/<collection>/…` path prefix.
-- Memory: export session transcripts into the QMD index when `memory.qmd.sessions.enabled` is set and honor `memory.citations` when formatting snippets.
 - Onboarding: add Venice API key to non-interactive flow. (#1893) Thanks @jonisjongithub.
 - Onboarding: strengthen security warning copy for beta + access control expectations.
 - Tlon: format thread reply IDs as @ud. (#1837) Thanks @wca4a.
