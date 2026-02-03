@@ -159,6 +159,42 @@ jobs:
       - name: Run ${{ matrix.task }} (${{ matrix.runtime }})
         run: ${{ matrix.command }}
 
+  docs-chat-index:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Detect docs changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - "docs/**"
+              - "scripts/docs-chat/**"
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.docs == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          check-latest: true
+
+      - name: Build docs chat index
+        if: steps.changes.outputs.docs == 'true'
+        run: node scripts/docs-chat/build-index.mjs --out scripts/docs-chat/search-index.json
+
+      - name: Verify docs chat index is up to date
+        if: steps.changes.outputs.docs == 'true'
+        run: |
+          if ! git diff --exit-code -- scripts/docs-chat/search-index.json; then
+            echo "::error::Docs chat index is out of date. Run pnpm docs:chat:index."
+            exit 1
+          fi
+
   secrets:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:

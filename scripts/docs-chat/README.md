@@ -11,6 +11,13 @@ pnpm docs:chat:index
 
 This generates `scripts/docs-chat/search-index.json` from `docs/**/*.md`.
 
+## Pipeline Integration
+
+The docs-chat context is the generated index. CI rebuilds it whenever docs change
+so PRs keep `scripts/docs-chat/search-index.json` in sync. If you run docs
+publishing outside CI (for example via Mintlify), make sure the deploy pipeline
+also runs `pnpm docs:chat:index` so the chat context stays current.
+
 ## Run the API
 
 ```bash
