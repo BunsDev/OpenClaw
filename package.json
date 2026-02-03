@@ -92,6 +92,8 @@
     "dev": "node scripts/run-node.mjs",
     "docs:bin": "node scripts/build-docs-list.mjs",
     "docs:build": "cd docs && pnpm dlx --reporter append-only mint broken-links",
+    "docs:chat:index": "node scripts/docs-chat/build-index.mjs --out scripts/docs-chat/search-index.json",
+    "docs:chat:serve": "node scripts/docs-chat/serve.mjs",
     "docs:dev": "cd docs && mint dev",
     "docs:list": "node scripts/docs-list.js",
     "format": "oxfmt --check",
