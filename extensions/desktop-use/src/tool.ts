@@ -1,15 +1,14 @@
 import { execFile } from "node:child_process";
-import os from "node:os";
-import path from "node:path";
 import { promisify } from "node:util";
 import { Static, Type } from "typebox";
 
 const execFileAsync = promisify(execFile);
 
 const MAX_TEXT_BYTES = 10_000;
-const MAX_PATH_BYTES = 2_048;
+const MAX_ARG_BYTES = 2_048;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const CAPTURE_TIMEOUT_MS = 45_000;
+const DEFAULT_ADAPTER_BIN = "coven-desktop-use";
 
 const CaptureMode = Type.Union([
   Type.Literal("screen"),
@@ -36,7 +35,7 @@ const DesktopUseToolSchema = Type.Object(
     ),
     app: Type.Optional(Type.String({ description: "Target app name, bundle id, or PID:123." })),
     windowTitle: Type.Optional(Type.String({ description: "Partial target window title." })),
-    windowId: Type.Optional(Type.Number({ description: "CoreGraphics window id." })),
+    windowId: Type.Optional(Type.Number({ description: "Platform window id." })),
     screenIndex: Type.Optional(Type.Number({ minimum: 0 })),
     mode: Type.Optional(CaptureMode),
     path: Type.Optional(Type.String({ description: "Output image path for capture/see." })),
@@ -44,12 +43,12 @@ const DesktopUseToolSchema = Type.Object(
     annotate: Type.Optional(
       Type.Boolean({ description: "Annotate UI elements for see. Default true." }),
     ),
-    retina: Type.Optional(Type.Boolean({ description: "Capture at Retina resolution." })),
-    analyze: Type.Optional(
-      Type.String({ description: "Optional Peekaboo image/see analysis prompt." }),
+    retina: Type.Optional(
+      Type.Boolean({ description: "Capture at Retina resolution when supported." }),
     ),
+    analyze: Type.Optional(Type.String({ description: "Optional backend analysis prompt." })),
     on: Type.Optional(
-      Type.String({ description: "Peekaboo element id from desktop_use action=see, e.g. B1." }),
+      Type.String({ description: "Element id from desktop_use action=see, e.g. B1." }),
     ),
     query: Type.Optional(Type.String({ description: "Element text/query for click fallback." })),
     coords: Type.Optional(Type.String({ description: "Coordinate fallback in x,y form." })),
@@ -71,13 +70,10 @@ const DesktopUseToolSchema = Type.Object(
     confirm: Type.Optional(
       Type.Boolean({
         description:
-          "Required for interactive actions (click/type/press/scroll/focus) after user approval.",
+          "Required for interactive actions (click/type/press/scroll/focus) after explicit user approval.",
       }),
     ),
     timeoutMs: Type.Optional(Type.Number({ minimum: 1000, maximum: 120000 })),
-    noRemote: Type.Optional(
-      Type.Boolean({ description: "Force local Peekaboo execution. Default true." }),
-    ),
   },
   { additionalProperties: false },
 );
@@ -89,60 +85,27 @@ type ToolResult = {
   details: unknown;
 };
 
+const INTERACTIVE_ACTIONS = new Set(["click", "type", "press", "scroll", "focus"]);
+
 export function createDesktopUseTool() {
   return {
     name: "desktop_use",
     label: "Desktop Use",
     description:
-      "Lightweight computer-use wrapper. On macOS it uses Peekaboo for permissions, annotated UI inspection, screenshots, and approved basic actions. On other platforms it returns unsupported gracefully.",
+      "Thin OpenClaw computer-use tool that delegates to the external OpenCoven coven-desktop-use adapter. OpenClaw owns approval policy; the adapter owns platform backends.",
     parameters: DesktopUseToolSchema,
     async execute(_toolCallId: string, rawParams: unknown): Promise<ToolResult> {
       const params = normalizeParams(rawParams as DesktopUseParams);
-      if (process.platform !== "darwin") {
-        return jsonResult({
-          supported: false,
-          platform: process.platform,
-          backend: "peekaboo",
-          message:
-            "desktop_use currently supports macOS via Peekaboo. This platform is unsupported.",
-        });
-      }
-
-      if (params.action === "permissions") {
-        return runPeekabooTool(["permissions"], params);
-      }
-
-      if (
-        ["click", "type", "press", "scroll", "focus"].includes(params.action) &&
-        params.confirm !== true
-      ) {
+      if (INTERACTIVE_ACTIONS.has(params.action) && params.confirm !== true) {
         return jsonResult({
           ok: false,
           requiresConfirmation: true,
           action: params.action,
           message:
-            "Interactive desktop actions require confirm:true after explicit user approval. Use permissions/see/capture freely first.",
+            "Interactive desktop actions require confirm:true after explicit user approval. Use permissions/see/capture first.",
         });
       }
-
-      switch (params.action) {
-        case "see":
-          return runPeekabooTool(buildSeeArgs(params), params, CAPTURE_TIMEOUT_MS);
-        case "capture":
-          return runPeekabooTool(buildCaptureArgs(params), params, CAPTURE_TIMEOUT_MS);
-        case "click":
-          return runPeekabooTool(buildClickArgs(params), params);
-        case "type":
-          return runPeekabooTool(buildTypeArgs(params), params);
-        case "press":
-          return runPeekabooTool(buildPressArgs(params), params);
-        case "scroll":
-          return runPeekabooTool(buildScrollArgs(params), params);
-        case "focus":
-          return runPeekabooTool(buildFocusArgs(params), params);
-        default:
-          throw new ToolInputError(`Unsupported action: ${String(params.action)}`);
-      }
+      return runAdapter(buildAdapterArgs(params), params);
     },
   };
 }
@@ -156,7 +119,7 @@ function normalizeParams(params: DesktopUseParams): DesktopUseParams {
   }
   for (const [label, value] of Object.entries(params)) {
     if (typeof value === "string") {
-      assertMaxBytes(value, label, label === "text" ? MAX_TEXT_BYTES : MAX_PATH_BYTES);
+      assertMaxBytes(value, label, label === "text" ? MAX_TEXT_BYTES : MAX_ARG_BYTES);
     }
   }
   if (params.coords && !/^\d{1,5},\d{1,5}$/.test(params.coords.trim())) {
@@ -165,29 +128,23 @@ function normalizeParams(params: DesktopUseParams): DesktopUseParams {
   return params;
 }
 
-async function runPeekabooTool(
-  args: string[],
-  params: DesktopUseParams,
-  fallbackTimeoutMs = DEFAULT_TIMEOUT_MS,
-): Promise<ToolResult> {
-  const timeout = params.timeoutMs ?? fallbackTimeoutMs;
-  const finalArgs = [...args, "--json"];
-  if (params.noRemote !== false) {
-    finalArgs.push("--no-remote");
-  }
+async function runAdapter(args: string[], params: DesktopUseParams): Promise<ToolResult> {
+  const timeout =
+    params.timeoutMs ??
+    (params.action === "see" || params.action === "capture"
+      ? CAPTURE_TIMEOUT_MS
+      : DEFAULT_TIMEOUT_MS);
+  const adapterBin = process.env.COVEN_DESKTOP_USE_BIN || DEFAULT_ADAPTER_BIN;
   try {
-    const { stdout, stderr } = await execFileAsync("peekaboo", finalArgs, {
+    const { stdout, stderr } = await execFileAsync(adapterBin, args, {
       timeout,
       maxBuffer: 10 * 1024 * 1024,
     });
-    const parsed = parseJsonOrText(stdout);
     return jsonResult({
       ok: true,
-      supported: true,
-      platform: process.platform,
-      backend: "peekaboo",
-      args: redactArgsForDetails(finalArgs),
-      result: parsed,
+      adapter: adapterBin,
+      args: redactArgsForDetails(args),
+      result: parseJsonOrText(stdout),
       stderr: stderr ? String(stderr) : undefined,
     });
   } catch (err) {
@@ -198,59 +155,82 @@ async function runPeekabooTool(
     };
     return jsonResult({
       ok: false,
-      supported: true,
-      platform: process.platform,
-      backend: "peekaboo",
-      args: redactArgsForDetails(finalArgs),
+      adapter: adapterBin,
+      args: redactArgsForDetails(args),
       error: error.message,
       code: error.code,
-      stdout: error.stdout ? String(error.stdout).slice(0, 4000) : undefined,
+      stdout: error.stdout ? parseJsonOrText(error.stdout) : undefined,
       stderr: error.stderr ? String(error.stderr).slice(0, 4000) : undefined,
+      hint: `Install the OpenCoven adapter or set COVEN_DESKTOP_USE_BIN to its path. Expected binary: ${DEFAULT_ADAPTER_BIN}`,
     });
+  }
+}
+
+function buildAdapterArgs(params: DesktopUseParams): string[] {
+  switch (params.action) {
+    case "permissions":
+      return ["permissions"];
+    case "see":
+      return buildSeeArgs(params);
+    case "capture":
+      return buildCaptureArgs(params);
+    case "click":
+      return buildClickArgs(params);
+    case "type":
+      return buildTypeArgs(params);
+    case "press":
+      return buildPressArgs(params);
+    case "scroll":
+      return buildScrollArgs(params);
+    case "focus":
+      return buildFocusArgs(params);
+    default:
+      throw new ToolInputError(`Unsupported action: ${String(params.action)}`);
   }
 }
 
 function buildSeeArgs(params: DesktopUseParams): string[] {
   const args = ["see"];
   addCommonTargetArgs(args, params);
-  if (params.mode && params.mode !== "auto") args.push("--mode", params.mode);
+  if (params.mode) args.push("--mode", params.mode);
   if (typeof params.screenIndex === "number")
     args.push("--screen-index", String(params.screenIndex));
-  if (params.annotate !== false) args.push("--annotate");
-  args.push("--path", normalizeOutputPath(params.path, "desktop-see", "png"));
+  if (params.annotate === false) args.push("--no-annotate");
+  if (params.path) args.push("--path", params.path);
   if (params.analyze) args.push("--analyze", params.analyze);
   return args;
 }
 
 function buildCaptureArgs(params: DesktopUseParams): string[] {
-  const format = params.format ?? "png";
-  const args = ["image", "--mode", params.mode ?? "frontmost", "--format", format];
+  const args = ["capture"];
+  if (params.mode) args.push("--mode", params.mode);
+  if (params.format) args.push("--format", params.format);
   addCommonTargetArgs(args, params);
   if (typeof params.screenIndex === "number")
     args.push("--screen-index", String(params.screenIndex));
   if (params.retina) args.push("--retina");
-  args.push("--path", normalizeOutputPath(params.path, "desktop-capture", format));
+  if (params.path) args.push("--path", params.path);
   if (params.analyze) args.push("--analyze", params.analyze);
   return args;
 }
 
 function buildClickArgs(params: DesktopUseParams): string[] {
-  const args = ["click"];
-  if (params.query) args.push(params.query);
+  if (!params.query && !params.on && !params.coords) {
+    throw new ToolInputError("click requires on, query, or coords.");
+  }
+  const args = ["click", "--confirm"];
+  if (params.query) args.push("--query", params.query);
   if (params.on) args.push("--on", params.on);
   if (params.coords) args.push("--coords", params.coords);
   if (params.double) args.push("--double");
   if (params.right) args.push("--right");
   addCommonTargetArgs(args, params);
-  if (!params.query && !params.on && !params.coords) {
-    throw new ToolInputError("click requires on, query, or coords.");
-  }
   return args;
 }
 
 function buildTypeArgs(params: DesktopUseParams): string[] {
   if (!params.text) throw new ToolInputError("type requires text.");
-  const args = ["type", params.text];
+  const args = ["type", "--confirm", "--text", params.text];
   if (params.clear) args.push("--clear");
   if (params.pressReturn) args.push("--return");
   addCommonTargetArgs(args, params);
@@ -259,40 +239,39 @@ function buildTypeArgs(params: DesktopUseParams): string[] {
 
 function buildPressArgs(params: DesktopUseParams): string[] {
   if (!params.keys?.length) throw new ToolInputError("press requires keys.");
-  const args = ["press", ...params.keys];
+  const args = ["press", "--confirm", "--keys", params.keys.join(",")];
   addCommonTargetArgs(args, params);
   return args;
 }
 
 function buildScrollArgs(params: DesktopUseParams): string[] {
   if (!params.direction) throw new ToolInputError("scroll requires direction.");
-  const args = ["scroll", "--direction", params.direction, "--amount", String(params.amount ?? 3)];
+  const args = [
+    "scroll",
+    "--confirm",
+    "--direction",
+    params.direction,
+    "--amount",
+    String(params.amount ?? 3),
+  ];
+  if (params.on) args.push("--on", params.on);
   addCommonTargetArgs(args, params);
   return args;
 }
 
 function buildFocusArgs(params: DesktopUseParams): string[] {
-  if (params.windowId || params.windowTitle || params.app) {
-    const args = ["window", "focus"];
-    addCommonTargetArgs(args, params);
-    return args;
+  if (!params.windowId && !params.windowTitle && !params.app) {
+    throw new ToolInputError("focus requires app, windowTitle, or windowId.");
   }
-  throw new ToolInputError("focus requires app, windowTitle, or windowId.");
+  const args = ["focus", "--confirm"];
+  addCommonTargetArgs(args, params);
+  return args;
 }
 
 function addCommonTargetArgs(args: string[], params: DesktopUseParams): void {
   if (params.app) args.push("--app", params.app);
   if (params.windowTitle) args.push("--window-title", params.windowTitle);
   if (typeof params.windowId === "number") args.push("--window-id", String(params.windowId));
-}
-
-function normalizeOutputPath(
-  value: string | undefined,
-  prefix: string,
-  format: "png" | "jpg",
-): string {
-  if (value?.trim()) return value.trim();
-  return path.join(os.tmpdir(), `openclaw-${prefix}-${Date.now()}.${format}`);
 }
 
 function parseJsonOrText(stdout: string | Buffer): unknown {
@@ -307,9 +286,9 @@ function parseJsonOrText(stdout: string | Buffer): unknown {
 
 function redactArgsForDetails(args: string[]): string[] {
   const redacted = [...args];
-  const typeIndex = redacted.indexOf("type");
-  if (typeIndex >= 0 && redacted[typeIndex + 1]) {
-    redacted[typeIndex + 1] = `<${Buffer.byteLength(redacted[typeIndex + 1], "utf8")}-byte text>`;
+  const textIndex = redacted.indexOf("--text");
+  if (textIndex >= 0 && redacted[textIndex + 1]) {
+    redacted[textIndex + 1] = `<${Buffer.byteLength(redacted[textIndex + 1], "utf8")}-byte text>`;
   }
   return redacted;
 }

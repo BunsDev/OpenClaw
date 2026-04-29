@@ -2,7 +2,7 @@
   "name": "@openclaw/desktop-use-plugin",
   "version": "2026.4.29",
   "private": true,
-  "description": "OpenClaw desktop computer-use plugin with Peekaboo backend on macOS",
+  "description": "OpenClaw desktop-use plugin for the external OpenCoven adapter",
   "type": "module",
   "dependencies": {
     "typebox": "1.1.34"
