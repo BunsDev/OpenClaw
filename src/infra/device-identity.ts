@@ -221,7 +221,7 @@ export function loadOrCreateDeviceIdentity(
 ): DeviceIdentity {
   try {
     const store = privateFileStoreSync(path.dirname(filePath));
-    const parsed = store.readJsonIfExists<unknown>(path.basename(filePath));
+    const parsed = store.readJsonIfExists(path.basename(filePath));
     const normalized = normalizeStoredIdentity(parsed);
     if (normalized?.kind === "identity") {
       if (normalized.stored) {
@@ -262,7 +262,7 @@ export function loadDeviceIdentityIfPresent(
   filePath: string = resolveDefaultIdentityPath(),
 ): DeviceIdentity | null {
   try {
-    const parsed = privateFileStoreSync(path.dirname(filePath)).readJsonIfExists<unknown>(
+    const parsed = privateFileStoreSync(path.dirname(filePath)).readJsonIfExists(
       path.basename(filePath),
     );
     const normalized = normalizeStoredIdentity(parsed);
