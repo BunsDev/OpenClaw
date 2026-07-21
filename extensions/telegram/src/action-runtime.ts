@@ -36,7 +36,10 @@ import {
   resolveTelegramInlineButtonsScope,
   resolveTelegramTargetChatType,
 } from "./inline-buttons.js";
-import { resolveTelegramInteractiveTextFallback } from "./interactive-fallback.js";
+import {
+  resolveTelegramPresentationFallbackBlocks,
+  resolveTelegramInteractiveTextFallback,
+} from "./interactive-fallback.js";
 import { resolveTelegramPollVisibility } from "./poll-visibility.js";
 import { resolveTelegramReactionLevel } from "./reaction-level.js";
 import {
@@ -230,14 +233,13 @@ function readTelegramSendContent(params: {
     readStringParam(params.args, "content", { allowEmpty: true }) ??
     readStringParam(params.args, "message", { allowEmpty: true }) ??
     readStringParam(params.args, "caption", { allowEmpty: true });
-  const unsupportedBlocks =
-    params.presentation?.blocks.filter(
-      (block) => block.type === "chart" || block.type === "table",
-    ) ?? [];
+  const unsupportedBlocks = params.presentation
+    ? resolveTelegramPresentationFallbackBlocks(params.presentation)
+    : [];
   const presentationText =
     explicitContent == null && params.presentation
       ? renderMessagePresentationFallbackText({ presentation: params.presentation })
-      : explicitContent != null && unsupportedBlocks.length > 0
+      : explicitContent != null && params.presentation && unsupportedBlocks.length > 0
         ? renderMessagePresentationFallbackText({
             text: explicitContent,
             presentation: { ...params.presentation, blocks: unsupportedBlocks },

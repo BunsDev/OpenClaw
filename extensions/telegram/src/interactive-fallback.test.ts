@@ -148,6 +148,34 @@ describe("canonicalizeTelegramPresentationPayload", () => {
     });
   });
 
+  it("preserves question option indexes around fallback-only actions", () => {
+    const questionId = "ask_0123456789abcdef0123456789abcdef";
+    const result = canonicalizeTelegramPresentationPayload({
+      presentation: {
+        blocks: [
+          {
+            type: "buttons",
+            buttons: [
+              {
+                label: "Launch",
+                action: { type: "web-app", url: "https://example.com/app" },
+              },
+              {
+                label: "Continue",
+                action: { type: "question", questionId, optionValue: "continue" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(result.text).toBe("- Launch: https://example.com/app");
+    expect(result.channelData?.telegram).toEqual({
+      buttons: [[{ text: "Continue", callback_data: `tgq1:${questionId}:1`, style: undefined }]],
+    });
+  });
+
   it("falls back presentation controls when explicit Telegram buttons take precedence", () => {
     const nativeButtons = [[{ text: "Native", callback_data: "native" }]];
     const result = canonicalizeTelegramPresentationPayload({

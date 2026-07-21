@@ -2022,7 +2022,7 @@ describe("handleTelegramAction", () => {
     );
     const call = mockCall(sendMessageTelegram, 0, "inline keyboard web app");
     expect(call[0]).toBe("5232990709");
-    expect(call[1]).toBe("Choose");
+    expect(call[1]).toBe("Choose\n\n- Launch: https://example.com/app");
     expect(requireRecord(call[2], "inline keyboard web app options").buttons).toBeUndefined();
   });
 });
