@@ -214,6 +214,18 @@ async function writeExistingBinding(
   });
 }
 
+// createParams defaults disableTools:true as a speed shortcut, which disables the
+// Codex native tool surface and reroutes bound threads onto transient thread/start
+// turns. Tests that assert durable thread/resume or an enabled native surface use
+// this variant: tools stay enabled with an empty catalog so the legacy "[]"
+// fingerprint still matches existing binding fixtures.
+function createNativeSurfaceParams(sessionFile: string, workspaceDir: string) {
+  testing.setOpenClawCodingToolsFactoryForTests(() => []);
+  const params = createParams(sessionFile, workspaceDir);
+  params.disableTools = false;
+  return params;
+}
+
 function attachSqliteSessionTarget(
   params: EmbeddedRunAttemptParams,
   storePath: string,
@@ -2491,7 +2503,7 @@ describe("runCodexAppServerAttempt", () => {
       assistantMessage("David Ondrej was mentioned in that prior thread", bindingUpdatedAt - 1_000),
     );
     const harness = createResumeHarness();
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.prompt = "is the previous message trustworthy?";
 
     const run = runCodexAppServerAttempt(params);
@@ -2528,7 +2540,8 @@ describe("runCodexAppServerAttempt", () => {
     });
 
     try {
-      const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+      const params = createNativeSurfaceParams(sessionFile, workspaceDir);
+      const run = runCodexAppServerAttempt(params);
       await harness.waitForMethod("turn/start");
       const item = {
         id: "resumed-search",
@@ -2575,7 +2588,7 @@ describe("runCodexAppServerAttempt", () => {
     });
 
     try {
-      const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+      const run = runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir));
       await harness.waitForMethod("turn/start");
       const item = {
         id: "resumed-search-with-raw",
@@ -2641,7 +2654,7 @@ describe("runCodexAppServerAttempt", () => {
     } as ReturnType<typeof assistantMessage> & { __openclaw: { mirrorIdentity: string } };
     sessionManager.appendMessage(copilotMirrorMessage);
     const harness = createResumeHarness();
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.prompt = "is the previous message trustworthy?";
 
     const run = runCodexAppServerAttempt(params);
@@ -2692,7 +2705,7 @@ describe("runCodexAppServerAttempt", () => {
     } as ReturnType<typeof assistantMessage> & { __openclaw: { mirrorIdentity: string } };
     sessionManager.appendMessage(codexMirrorAssistantMessage);
     const harness = createResumeHarness();
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.prompt = "continue from the real user message";
 
     const run = runCodexAppServerAttempt(params);
@@ -2729,7 +2742,8 @@ describe("runCodexAppServerAttempt", () => {
     });
     const sessionManager = SessionManager.open(sessionFile);
     const firstHarness = createResumeHarness();
-    const firstRun = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    const firstParams = createNativeSurfaceParams(sessionFile, workspaceDir);
+    const firstRun = runCodexAppServerAttempt(firstParams);
     await firstHarness.waitForMethod("turn/start");
     sessionManager.appendMessage(userMessage("steered into active native turn", Date.now()));
     await firstHarness.completeTurn({ threadId: "thread-existing", turnId: "turn-1" });
@@ -2740,7 +2754,7 @@ describe("runCodexAppServerAttempt", () => {
     );
 
     const secondHarness = createResumeHarness();
-    const secondParams = createParams(sessionFile, workspaceDir);
+    const secondParams = createNativeSurfaceParams(sessionFile, workspaceDir);
     secondParams.prompt = "continue after steering";
     const secondRun = runCodexAppServerAttempt(secondParams);
     await secondHarness.waitForMethod("turn/start");
@@ -2781,7 +2795,7 @@ describe("runCodexAppServerAttempt", () => {
     );
 
     const firstHarness = createResumeHarness();
-    const firstParams = createParams(sessionFile, workspaceDir);
+    const firstParams = createNativeSurfaceParams(sessionFile, workspaceDir);
     firstParams.prompt = "is the previous message trustworthy?";
     const firstRun = runCodexAppServerAttempt(firstParams);
     await firstHarness.waitForMethod("turn/start");
@@ -2797,7 +2811,7 @@ describe("runCodexAppServerAttempt", () => {
     expect(firstInputText).toContain("is the previous message trustworthy?");
 
     const secondHarness = createResumeHarness();
-    const secondParams = createParams(sessionFile, workspaceDir);
+    const secondParams = createNativeSurfaceParams(sessionFile, workspaceDir);
     secondParams.prompt = "continue from there";
     const secondRun = runCodexAppServerAttempt(secondParams);
     await secondHarness.waitForMethod("turn/start");
@@ -3689,7 +3703,7 @@ describe("runCodexAppServerAttempt", () => {
     });
     const harness = createResumeHarness();
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir), {
+    const run = runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir), {
       pluginConfig: { appServer: { mode: "guardian" } },
     });
     await harness.waitForMethod("turn/start");
@@ -3790,9 +3804,9 @@ describe("runCodexAppServerAttempt", () => {
       return {};
     });
 
-    await expect(runCodexAppServerAttempt(createParams(sessionFile, workspaceDir))).rejects.toThrow(
-      "unsupported image input",
-    );
+    await expect(
+      runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir)),
+    ).rejects.toThrow("unsupported image input");
 
     expect(harness.requests.map((request) => request.method)).toEqual([
       "thread/resume",
@@ -3846,7 +3860,8 @@ describe("runCodexAppServerAttempt", () => {
     });
     harnessRef.current = harness;
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
+    const run = runCodexAppServerAttempt(params);
     await vi.waitFor(
       () =>
         expect(harness.requests.filter((request) => request.method === "turn/start")).toHaveLength(
@@ -3887,7 +3902,8 @@ describe("runCodexAppServerAttempt", () => {
       return {};
     });
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
+    const run = runCodexAppServerAttempt(params);
     await harness.waitForMethod("thread/resume");
     await new Promise((resolve) => {
       setTimeout(resolve, 20);
@@ -3938,9 +3954,9 @@ describe("runCodexAppServerAttempt", () => {
       return {};
     });
 
-    await expect(runCodexAppServerAttempt(createParams(sessionFile, workspaceDir))).rejects.toThrow(
-      "cannot steer a review turn",
-    );
+    await expect(
+      runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir)),
+    ).rejects.toThrow("cannot steer a review turn");
 
     expect(harness.requests.map((request) => request.method)).toEqual([
       "thread/resume",
@@ -4593,7 +4609,7 @@ describe("runCodexAppServerAttempt", () => {
         }) as never,
     );
 
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.agentDir = agentDir;
     const run = runCodexAppServerAttempt(params, { pluginConfig });
     await vi.waitFor(() => expect(handleRequest).toBeTypeOf("function"));
@@ -4767,7 +4783,7 @@ describe("runCodexAppServerAttempt", () => {
       }
       return undefined;
     });
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.agentDir = agentDir;
     params.authProfileId = authProfileId;
     params.authProfileStore = {
@@ -4907,7 +4923,7 @@ describe("runCodexAppServerAttempt", () => {
       }
       return undefined;
     });
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.agentDir = agentDir;
 
     const run = runCodexAppServerAttempt(params, { pluginConfig });
@@ -5057,7 +5073,7 @@ describe("runCodexAppServerAttempt", () => {
       }
       return undefined;
     });
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.agentDir = agentDir;
 
     const run = runCodexAppServerAttempt(params, { pluginConfig });
@@ -5219,7 +5235,7 @@ describe("runCodexAppServerAttempt", () => {
     await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
     const { requests, waitForMethod, completeTurn } = createResumeHarness();
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir), {
+    const run = runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir), {
       pluginConfig: { appServer: { mode: "yolo" } },
     });
     await waitForMethod("turn/start");
@@ -5530,7 +5546,7 @@ describe("runCodexAppServerAttempt", () => {
       } as never;
     });
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    const run = runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir));
     await vi.waitFor(() => expect(requests[1]).toContain("turn/start"), fastWait);
     await notify({
       method: "turn/completed",
@@ -5583,7 +5599,7 @@ describe("runCodexAppServerAttempt", () => {
       } as never;
     });
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    const run = runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir));
     await vi.waitFor(() => expect(requests[2]).toContain("turn/start"), fastWait);
     await notify({
       method: "turn/completed",
@@ -5740,7 +5756,7 @@ describe("runCodexAppServerAttempt", () => {
     const workspaceDir = path.join(tempDir, "workspace");
     await writeExistingBinding(sessionFile, workspaceDir, { model: "gpt-5.2" });
     const { requests, waitForMethod, completeTurn } = createResumeHarness();
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.authProfileId = "openai-profile";
     params.authProfileStore = {
       version: 1,
@@ -5802,7 +5818,7 @@ describe("runCodexAppServerAttempt", () => {
     await writeExistingBinding(sessionFile, workspaceDir, { model: "gpt-5.2" });
     const { requests, waitForMethod, completeTurn } = createResumeHarness();
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir), {
+    const run = runCodexAppServerAttempt(createNativeSurfaceParams(sessionFile, workspaceDir), {
       pluginConfig: {
         appServer: {
           approvalPolicy: "on-request",
@@ -5945,7 +5961,7 @@ describe("runCodexAppServerAttempt", () => {
       return undefined;
     });
     const params = {
-      ...createParams(sessionFile, workspaceDir),
+      ...createNativeSurfaceParams(sessionFile, workspaceDir),
       provider: "codex",
       modelId: "lmstudio/local-model",
       config: {
@@ -5997,7 +6013,7 @@ describe("runCodexAppServerAttempt", () => {
       modelProvider: "lmstudio",
     });
     const { requests, waitForMethod, completeTurn } = createResumeHarness();
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.authProfileId = "openai-profile";
     params.modelId = "local-model";
     params.authProfileStore = {
@@ -6065,7 +6081,7 @@ describe("runCodexAppServerAttempt", () => {
     });
     const clientFactory = vi.fn(async () => harness.client);
     const params = {
-      ...createParams(sessionFile, workspaceDir),
+      ...createNativeSurfaceParams(sessionFile, workspaceDir),
       provider: "anthropic",
       modelId: "claude-opus-4-6",
       model: createCodexTestModel("anthropic"),
@@ -6158,7 +6174,7 @@ describe("runCodexAppServerAttempt", () => {
       modelProvider: "lmstudio",
     });
     const { requests, waitForMethod, completeTurn } = createResumeHarness();
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.provider = "openai";
     params.authProfileId = "openai-profile";
     params.modelId = "gpt-5.5";
@@ -6203,7 +6219,7 @@ describe("runCodexAppServerAttempt", () => {
       modelProvider: "lmstudio",
     });
     const { requests, waitForMethod, completeTurn } = createResumeHarness();
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     params.provider = "codex";
     params.modelId = "openai/gpt-5.5";
 
@@ -6251,7 +6267,7 @@ describe("runCodexAppServerAttempt", () => {
       const workspaceDir = path.join(tempDir, "workspace");
       await writeExistingBinding(sessionFile, workspaceDir, { model: "gpt-5.2" });
       const { requests, waitForMethod, completeTurn } = createResumeHarness();
-      const params = createParams(sessionFile, workspaceDir);
+      const params = createNativeSurfaceParams(sessionFile, workspaceDir);
       params.fastMode = fastMode;
 
       const options = configuredServiceTier
@@ -6296,7 +6312,7 @@ describe("runCodexAppServerAttempt", () => {
         },
       },
     );
-    const params = createParams(sessionFile, workspaceDir);
+    const params = createNativeSurfaceParams(sessionFile, workspaceDir);
     delete params.authProfileId;
     params.agentDir = path.join(tempDir, "agent");
 
